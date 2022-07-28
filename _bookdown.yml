@@ -1,0 +1,7 @@
+book_filename: "RP"
+output_dir: docs
+delete_merged_file: true
+new_session: false
+edit: https://github.com/munimn/researchprojectdata/edit/main/%s
+view: https://github.com/munimn/researchprojectdata/blob/main/%s
+

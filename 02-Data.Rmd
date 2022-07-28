@@ -1,0 +1,256 @@
+# Data
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(include=TRUE, echo=FALSE, message=FALSE, warning=FALSE)
+```
+
+In this investigation we are going to be focusing on the correlation between race and median income. Our data comes from the ACS 5 year dataset on counties in the United States. We are going to be including race, education, and  marital status in our analysis and regressions. We removed the data from Puerto Rico because the median income data is missing. 
+
+One of the easiest ways to quickly assess the economic prosperity in a county is to look at the median income. This is what we are going to be monitoring in this investigation. The variables that we are going to be using is `median_income_in_thousands` and this variable contains data on the median income of each county in the United States measured in thousands of dollars. 
+
+While we are going to be focusing on race, there are other variables that we are going to be incorporating in our visualizations and regressions including marital status. The variables that we are going to be using are `pct_married` [Now married (except separated)], `pct_separated`, `pct_widowed`, and `pct_divorced`. We calculated these values by dividing the number of each category by the number of labor force participants in each respective county.
+
+The second category that we are going to be investigating is education. Going into this analysis we assumed this would have the largest correlation with median income and therefore we wanted to make sure we could incorporate and control for this data. The variables that we are going to be using are `pct_HS`, `pct_somecollege`, and `pct_bachelor_or_higher`. The high school graduate statistic includes high school equivalency. We calculated these values by dividing the number of people meeting the education level with the total number of people over the age of 25 which makes these statistics more meaningful for analysis. 
+
+Finally, we are going to be looking at race through 5 different categories (`pct_white`, `pct_black`, `pct_AmerIndian_or_alaska`, `pct_asian`, and `pct_hispanic_or_latino`). Each of these were calculated by dividing the number of people by the total county population from the ACS race category. The value used in calculating for `pct_white` is the number of non-Hispanic/Latino population who are white alone. This same processes was the same for the other two non Hispanic/Latino variables as well.  
+
+
+```{r, message=FALSE, warning=FALSE, include=TRUE}
+library(tidyverse)
+library(leaflet)
+library(rmapshaper)
+library(tidycensus)
+library(plm)
+library(stargazer)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+options(tigris_use_cache = TRUE)
+variables <- load_variables(2019, "acs5", cache = TRUE)
+
+
+## turn off scientific notation
+options(scipen = 999)
+## GIS version for Maps
+mapsdata<- get_acs(
+  geography = "county",
+  variables = "B01001_001",
+  geometry = TRUE,
+  keep_geo_vars = TRUE
+) %>%
+  select(GEOID,
+    stFIPS = STATEFP,
+    coFIPS = COUNTYFP,
+    coNAME = NAME.x,
+    Population = estimate,
+    geometry
+  )
+
+```
+
+```{r}
+Allvariables<-  get_acs(
+  geography = "county",
+  variables = c("B06011_001","B12006_013","B12006_024", "B12006_035","B12006_046", "B01002_001", "B03002_004","B03002_005", "B03002_006","B16010_001","B16010_015","B16010_028","B16010_041","B12006_001","B02001_001","B03002_003","B03002_012"),
+  geometry = FALSE
+) %>%
+  select(-moe) %>%
+  spread(variable, estimate)%>%
+  mutate(
+    median_income_in_thousands = B06011_001 / 1000,
+    pct_married =  B12006_013 / B12006_001 * 100,
+  pct_separated = B12006_024 / B12006_001 * 100,
+  pct_widowed = B12006_035 / B12006_001 * 100,
+  pct_divorced = B12006_046 / B12006_001 * 100,
+  pct_HS = B16010_015 / B16010_001 * 100,
+  pct_somecollege = B16010_028 / B16010_001 * 100,
+  pct_bachelor_or_higher = B16010_041 / B16010_001 * 100,
+  pct_white =B03002_003 / B02001_001 * 100,
+  pct_black = B03002_004 / B02001_001 * 100,
+  pct_AmerIndian_or_alaska = B03002_005 / B02001_001 * 100,
+  pct_asian = B03002_006 / B02001_001 * 100,
+  pct_hispanic_or_latino = B03002_012/B02001_001*100
+ ) %>%
+  select(-c("B06011_001","B12006_013","B12006_024", "B12006_035","B12006_046", "B01002_001", "B03002_004","B03002_005", "B03002_006","B16010_001","B16010_015","B16010_028","B16010_041","B12006_001","B02001_001","B03002_003" ,"NAME","B03002_012"))
+```
+
+```{r}
+## Non GIS version for regressions
+regressiondata <- get_acs(
+  geography = "county",
+  variables = "B01001_001",
+  geometry = FALSE
+) %>%
+  select(GEOID,
+    NAME,
+    Population = estimate
+  )
+
+#State Data 
+stateGIS <- get_acs(
+  geography = "state",
+  variables = "B01001_001",
+  geometry = TRUE,
+  keep_geo_vars = TRUE
+)
+```
+
+
+```{r}
+## Version 1: including geometry information
+FulldataGIS <- mapsdata %>%
+  inner_join(Allvariables, by = "GEOID") %>%
+  rename(FIPS = GEOID) %>% select(-Population)
+
+## Version 2: excluding geometry information
+Fulldata <- regressiondata %>%
+  inner_join(Allvariables, by = "GEOID") %>%
+  rename(FIPS = GEOID)%>% mutate( stFIPS = substr(FIPS,1,2),coFIPS = substr(FIPS,3,5)) %>% select(-Population)
+```
+
+```{r}
+
+## Simplify GIS data to make file sizes smaller. This essentially removes some details along coastlines and very-not-straight borders. 
+stateGIS <- ms_simplify(stateGIS, keep = 0.01)
+FulldataGIS <- ms_simplify(FulldataGIS, keep = 0.01)
+
+
+## join 2-character state abbreviation and create name = "county, St" for labeling maps (e.g., Outagamie, WI) 
+
+fipsToSTcode <- fips_codes %>% select(stFIPS = state_code, stNAME = state) %>% unique()
+
+FulldataGIS <- inner_join(FulldataGIS,fipsToSTcode,by="stFIPS")
+
+FulldataGIS <- FulldataGIS %>% mutate(name = paste0(coNAME,", ", stNAME))
+
+Fulldata <- inner_join(Fulldata,fipsToSTcode,by="stFIPS")
+
+
+
+## For mapping, let's drop the following: 
+##   Puerto Rico (ST FIPS 72) (no election data)
+##   Alaska (ST FIPS 02) (voting data isn't reported by county...we could also map the legislative districts, but we're not going to since we'd rather have smaller maps without those extra details)
+##   Hawaii (ST FIPS 15) (so our map can zoom in on continental 48 states)
+FulldataGIS <- FulldataGIS %>% filter(stFIPS != "72" & stFIPS != "02" & stFIPS != "15")
+stateGIS <- stateGIS %>% filter(GEOID != "72" & GEOID != "02" & GEOID != "15")
+Fulldata <- Fulldata %>% filter(stFIPS != "72")
+```
+
+
+```{r, include=FALSE}
+Fulldata%>% filter(!complete.cases(Fulldata))
+```
+```{r}
+d1<-ggplot(data=Fulldata, aes(x=pct_hispanic_or_latino, median_income_in_thousands)) +
+  geom_point() +
+  geom_smooth(method=lm , color="red", se=FALSE) 
+```
+```{r}
+d2<-ggplot(data=Fulldata, aes(x=pct_black, median_income_in_thousands)) +
+  geom_point() +
+  geom_smooth(method=lm , color="red", se=FALSE) 
+```
+```{r}
+d3<-ggplot(data=Fulldata, aes(x=pct_asian, median_income_in_thousands)) +
+  geom_point() +
+  geom_smooth(method=lm , color="red", se=FALSE) 
+```
+```{r}
+d4<-ggplot(data=Fulldata, aes(x=pct_white, median_income_in_thousands)) +
+  geom_point() +
+  geom_smooth(method=lm , color="red", se=FALSE) 
+```
+```{r }
+grid.arrange(arrangeGrob(d1,d2,d3,d4, top = grid::textGrob("Comparison of median income for different percentage of race", gp=grid::gpar(fontsize=8)), ncol = 2))
+```
+
+As we can see in the plots above, there are stark differences between the 4 different race categories with respect to median income. We can see the median income potted on the y-axis and the race category on the x-axis. There is a linear model fitting the data which allows us to pick up on a few trends. From this initial stage of visualization we can see that there is a strong upward trend for percent Asian population and a clear downward trend for percent black population. There is a slight upward trend for white but it is relatively minor. The linear model suggests that there isn't much of a trend for Hispanic/Latino but this model doesn't seem to fit the data closely. 
+
+```{r}
+ggplot(data=Fulldata, aes(x=median_income_in_thousands)) +
+    geom_histogram( binwidth=1, fill="#69b3a2", color="#e9ecef", alpha=0.9) +
+    ggtitle("Median Income distribution") +
+    theme(
+      plot.title = element_text(size=15)
+    )
+```
+
+We can see from the Median Income Distribution plot that a majority of the counties fall in the $20-40k range. The smallest value is approximately 8k and the largest being 70k. 
+
+```{r}
+ggplot(data=Fulldata, aes(x=(pct_white))) +
+    geom_histogram( binwidth=1, fill="#69b3a2", color="#e9ecef", alpha=0.9) +
+    ggtitle("White Population Percentage Distribution") +
+    theme(
+      plot.title = element_text(size=15)
+    )
+```
+
+The White Population Percentage Distribution plot shows us that a majority of counties have a white population over 50%. This helps us visualize how few counties actually have large minority populations. We can see that there are many counties with a white population of over 90%. 
+
+```{r}
+
+popup1 <- function(dataset) {
+  return(
+    paste0(
+      "<b>", dataset$name, " (", dataset$FIPS, ")</b>",
+      "<br><font color='red'>Median income ($000): ",
+      format(dataset$median_income_in_thousands,nsmall = 3), "</font>",
+      
+      "<br>% White: ",
+      format(dataset$pct_white, digits = 2), "%",
+      
+      "<br>% Black: ",
+      format(dataset$pct_black, digits = 2), "%",
+      
+      "<br>% Asian: ",
+      format(dataset$pct_asian, digits = 2), "%",
+      
+      "<br>% American Indian : ",
+      format(dataset$pct_AmerIndian_or_alaska, digits = 2), "%",
+      
+      "<br>% Hispanic or latino : ",
+      format(dataset$pct_hispanic_or_latino, digits = 2), "%",
+      
+      "<br>% Married : ",
+      format(dataset$pct_married, digits = 2), "%",
+      
+      "<br>% Widowed: ",
+      format(dataset$pct_widowed, digits = 2), "%",
+  
+      "<br>% Divorced: ",
+      format(dataset$pct_divorced, digits = 2), "%",
+      
+      "<br>% Separated: ",
+      format(dataset$pct_separated, digits = 2), "%",
+      "<br>% High School: ",
+      format(dataset$pct_HS, digits = 2), "%",
+      "<br>% Some College: ",
+      format(dataset$pct_somecollege, digits = 2), "%",
+      "<br>% Bachelor or Higher: ",
+      format(dataset$pct_bachelor_or_higher, digits = 2), "%"
+ ) %>%
+      lapply(htmltools::HTML)
+  )
+}
+```
+
+
+
+
+```{r}
+
+pal <- colorBin("YlGnBu", FulldataGIS$pct_white,bins = c(0,10,20,30,40,50,60,70,80,85,90,95,100), reverse=TRUE)
+
+ leaflet(FulldataGIS, options = leafletOptions(crsClass = "L.CRS.EPSG3857"), width="100%") %>%
+  
+  addPolygons(weight = 0.5, color = "gray", opacity = 0.7,
+    fillColor = ~pal(pct_white), fillOpacity = 1, smoothFactor = 0.5,
+    label = popup1(FulldataGIS),
+    labelOptions = labelOptions(direction = "auto"))%>%
+ addPolygons(data = stateGIS,fill = FALSE,color="black",weight = 1) %>%
+    addLegend(pal = pal,values = ~FulldataGIS$pct_white, opacity = 0.7, title = "% of White",position = "bottomright")
+
+```
+
+The final plot is an interactive visualization of all of the data that we are going to be investigating. When scrolling over any of the counties you will be able to view the 13 variables in our analysis. The map is color coded by the percentage of white population and you can see an interesting trend in the data. There are many high percentage white populations in rural areas and in the middle and northern parts of the country. We can also see how most of the states with large non white populations are located in the south along the United States-Mexico border. This make sense due to the immigration over the border of Hispanic and Latino populations 

@@ -1,0 +1,12 @@
+# Introduction
+
+We are investigating any correlation between race and median income. Other factors in this investigation include marital status and education. In our investigation we used the 5 year American Community Survey (ACS) data on the United States by county. We used the most recent dataset which was 2019. We are also going to be briefly exploring the concept of a model minority which we were able to observe in the initial data graphs with Asian Americans[^1]. 
+
+With the primary focus being on race, we found that the percentage of Asians, percentage of whites, and percentage of Hispanic/Latino was correlated with higher median income depending on the regression model being observed. We also found that an increase in the percent of black population was correlated with an increase in median income which doesn't support our initial data visualizations. The percentage of American Indian or Alaskan didn't appear to have a significant effect on median income. In our investigation we found that marital status had a significant impact on median income. More specifically, the percentage of married people in a county was correlated with higher median income in our regression models (and divorced to a slighter degree) and this was the opposite for widowed and separated. We also found that education had a strong positive correlation with median income and this was especially true when looking at the percentage of people with a bachelors degree in a population. 
+
+
+[^1]: The model minority myth. The Practice. (2019, March 26). https://thepractice.law.harvard.edu/article/the-model-minority-myth/
+
+
+
+
